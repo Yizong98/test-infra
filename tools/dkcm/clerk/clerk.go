@@ -31,6 +31,17 @@ type Cluster struct {
 	zone        string
 }
 
+type ClerkOperations interface {
+	//check cluster available
+	CheckAvail() bool
+	// get with token
+	GetCluster(token string) ([]string, error)
+	// delete a cluster entry
+	DelCluster(token string) error
+	// Insert a cluster entry
+	InsertCluster(prowId string) (token string)
+}
+
 var (
 	db *sql.DB
 )
