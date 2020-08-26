@@ -18,7 +18,6 @@ package clerk
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -65,12 +64,6 @@ func (c Cluster) String() string {
 
 var (
 	ctx = context.Background()
-
-	// ErrNotFound indicates that a Prow request wasn't found in the database
-	ErrNotFound = errors.New("request not found")
-
-	// ErrKeyConflict indicates that a row cannot be inserted due to key conflict
-	ErrKeyConflict = errors.New("Key Conflict")
 )
 
 // NewDB returns the DB object with an active database connection
@@ -83,7 +76,7 @@ func (db *DB) CheckAvail() (bool, string, string) {
 	// check whether available cluster exists
 	row := db.QueryRow("SELECT * FROM Cluster WHERE Status = 'Ready' AND ProwId = '0' ")
 	cl := new(Cluster)
-	err := row.Scan(&cl.ClusterId, &cl.accessToken, &cl.BoskosId, &cl.ProwId, &cl.Status, &cl.Zone)
+	err := row.Scan(&cl.ClusterId, &cl.accessToken, &cl.BoskosId, &cl.ProwId, &cl.Status, &cl.Zone, &cl.lastUpdate)
 	// no available cluster is found
 	if err != nil {
 		return false, "", ""
@@ -155,8 +148,23 @@ func (db *DB) GenerateToken() string {
 	}
 }
 
-func getCluster(token string) {
+func (db *DB) getCluster(token string) ([]string, error) {
 	// check in with token
+	row := db.QueryRow("SELECT * FROM Cluster WHERE AccessToken = $1", token)
+	cl := new(Cluster)
+	err := row.Scan(&cl.ClusterId, &cl.accessToken, &cl.BoskosId, &cl.ProwId, &cl.Status, &cl.Zone, &cl.lastUpdate)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("Illegal token! No trepassing!: %v", err)
+	} else if err != nil {
+		return nil, fmt.Errorf("We don't understand your request. Please try again!: %v", err)
+	} else {
+		if cl.Status == "Ready" {
+			return []string{cl.ClusterId, cl.BoskosId, cl.Zone}, nil
+		} else {
+			return nil, nil
+		}
+
+	}
 
 }
 
