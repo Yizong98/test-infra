@@ -16,7 +16,6 @@ limitations under the License.
 package clerk
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -26,7 +25,7 @@ import (
 )
 
 // Cluster stores a row in the "Cluster" db table
-// Table Schema:
+// Table Schema: knative.dev/test-infra/tools/dkcm/clerk/schema.sql
 type Cluster struct {
 	ClusterId   string
 	accessToken string
@@ -37,11 +36,18 @@ type Cluster struct {
 	lastUpdate  time.Time
 }
 
+// ClusterConfig is the struct to return to Prow once the cluster is available
+type ClusterConfig struct {
+	ClusterName string
+	BoskosId    string
+	Zone        string
+}
+
 type ClerkOperations interface {
 	//check cluster available, if available, return cluster id and access token
 	CheckAvail() (bool, string, string)
 	// get with token
-	GetCluster(token string) ([]string, error)
+	GetCluster(token string) (ClusterConfig, error)
 	// delete a cluster entry
 	DeleteCluster(accessToken string) error
 	// Insert a cluster entry
@@ -62,10 +68,6 @@ func (c Cluster) String() string {
 		c.lastUpdate, c.ClusterId, c.BoskosId, c.ProwId, c.Status, c.Zone)
 }
 
-var (
-	ctx = context.Background()
-)
-
 // NewDB returns the DB object with an active database connection
 func NewDB(c *mysql.DBConfig) (*DB, error) {
 	db, err := c.Connect()
@@ -75,7 +77,7 @@ func NewDB(c *mysql.DBConfig) (*DB, error) {
 func (db *DB) CheckAvail() (bool, string, string) {
 	// check whether available cluster exists
 	row := db.QueryRow("SELECT * FROM Cluster WHERE Status = 'Ready' AND ProwId = '0' ")
-	cl := new(Cluster)
+	cl := &Cluster{}
 	err := row.Scan(&cl.ClusterId, &cl.accessToken, &cl.BoskosId, &cl.ProwId, &cl.Status, &cl.Zone, &cl.lastUpdate)
 	// no available cluster is found
 	if err != nil {
@@ -86,7 +88,7 @@ func (db *DB) CheckAvail() (bool, string, string) {
 
 // insert a cluster entry into db
 func (db *DB) InsertCluster(accessToken string, boskosId string, prowId string, status string, zone string) error {
-	stmt, err := db.Prepare(`INSERT INTO Cluster(AccessToken,BoskosId,ProwId,Status,Zone,lastUpdate)
+	stmt, err := db.Prepare(`INSERT INTO Cluster(AccessToken,BoskosId,ProwId,Status,Zone,LastUpdate)
 							VALUES (?,?,?,?,?,?)`)
 	defer stmt.Close()
 
@@ -107,7 +109,7 @@ func (db *DB) ListClusters(window time.Duration) ([]Cluster, error) {
 	rows, err := db.Query(`
 	SELECT ID, BoskosId, AccessToken, ProwId, Status, Zone, LastUpdate
 	FROM Cluster
-	WHERE lastUpdate > ?`, startTime)
+	WHERE LastUpdate > ?`, startTime)
 
 	for rows.Next() {
 		entry := Cluster{}
@@ -126,7 +128,7 @@ func (db *DB) ListClusters(window time.Duration) ([]Cluster, error) {
 func (db *DB) DeleteCluster(accessToken string) error {
 	stmt, err := db.Prepare(`
 				DELETE FROM Cluster
-				WHERE ErrorPattern = ?`)
+				WHERE AccessToken = ?`)
 	defer stmt.Close()
 
 	if err == nil {
@@ -148,10 +150,10 @@ func (db *DB) GenerateToken() string {
 	}
 }
 
-func (db *DB) getCluster(token string) ([]string, error) {
+func (db *DB) getCluster(token string) (*ClusterConfig, error) {
 	// check in with token
 	row := db.QueryRow("SELECT * FROM Cluster WHERE AccessToken = $1", token)
-	cl := new(Cluster)
+	cl := &Cluster{}
 	err := row.Scan(&cl.ClusterId, &cl.accessToken, &cl.BoskosId, &cl.ProwId, &cl.Status, &cl.Zone, &cl.lastUpdate)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("Illegal token! No trepassing!: %v", err)
@@ -159,9 +161,10 @@ func (db *DB) getCluster(token string) ([]string, error) {
 		return nil, fmt.Errorf("We don't understand your request. Please try again!: %v", err)
 	} else {
 		if cl.Status == "Ready" {
-			return []string{cl.ClusterId, cl.BoskosId, cl.Zone}, nil
+			clusterName := nameCluster(cl.ClusterId, cl.ProwId)
+			return &ClusterConfig{clusterName, cl.BoskosId, cl.Zone}, nil
 		} else {
-			return nil, nil
+			return &ClusterConfig{}, nil
 		}
 
 	}
@@ -180,4 +183,9 @@ func execAffectingOneRow(stmt *sql.Stmt, args ...interface{}) error {
 		return fmt.Errorf("expected 1 row affected, got %d", rowsAffected)
 	}
 	return nil
+}
+
+// name cluster in the following format: e2e-cluster{id}-{prowid}
+func nameCluster(clusterId string, prowId string) string {
+	return fmt.Sprintf("e2e-cluster%s-%s", clusterId, prowId)
 }

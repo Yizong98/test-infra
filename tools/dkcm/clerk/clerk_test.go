@@ -13,16 +13,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+package clerk
 
-CREATE TABLE Clusters 
-(
-  ID            int           NOT NULL AUTO_INCREMENT,
-  AccessToken   varchar(1023) NOT NULL,
-  BoskosId      varchar(1023) NOT NULL,
-  ProwId        varchar(1023) DEFAULT '0',
-  Status        varchar(1023) DEFAULT 'WIP',
-  Zone          varchar(1023) NOT NULL,
-  LastUpdate    timestamp,
-  PRIMARY KEY (ID)
+import "testing"
 
-);
+func getFakeDB() *ClerkOperations {
+	return nil
+}
+
+func TestCheckAvail(t *testing.T) {
+
+}
