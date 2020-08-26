@@ -38,6 +38,21 @@ type Cluster struct {
 	lastUpdate  time.Time
 }
 
+type ClerkOperations interface {
+	//check cluster available, if available, return cluster id and access token
+	CheckAvail() (bool, string, string)
+	// get with token
+	GetCluster(token string) ([]string, error)
+	// delete a cluster entry
+	DeleteCluster(accessToken string) error
+	// Insert a cluster entry
+	InsertCluster(accessToken string, boskosId string, prowId string, status string, zone string, lastUpdate time.Time) error
+	// List clutsers within a time interval
+	ListClusters(window time.Duration) ([]Cluster, error)
+	// Generate Unique access token for Prow
+	GenerateToken() string
+}
+
 // DB holds an active database connection
 type DB struct {
 	*sql.DB
@@ -64,7 +79,20 @@ func NewDB(c *mysql.DBConfig) (*DB, error) {
 	return &DB{db}, err
 }
 
-func (db *DB) InsertCluster(accessToken string, boskosId string, prowId string, status string, zone string, lastUpdate time.Time) error {
+func (db *DB) CheckAvail() (bool, string, string) {
+	// check whether available cluster exists
+	row := db.QueryRow("SELECT * FROM Cluster WHERE Status = 'Ready' AND ProwId = '0' ")
+	cl := new(Cluster)
+	err := row.Scan(&cl.ClusterId, &cl.accessToken, &cl.BoskosId, &cl.ProwId, &cl.Status, &cl.Zone)
+	// no available cluster is found
+	if err != nil {
+		return false, "", ""
+	}
+	return true, cl.ClusterId, cl.accessToken
+}
+
+// insert a cluster entry into db
+func (db *DB) InsertCluster(accessToken string, boskosId string, prowId string, status string, zone string) error {
 	stmt, err := db.Prepare(`INSERT INTO Cluster(AccessToken,BoskosId,ProwId,Status,Zone,lastUpdate)
 							VALUES (?,?,?,?,?,?)`)
 	defer stmt.Close()
@@ -73,7 +101,7 @@ func (db *DB) InsertCluster(accessToken string, boskosId string, prowId string, 
 		return err
 	}
 
-	_, err = stmt.Exec(accessToken, boskosId, prowId, status, zone, lastUpdate, time.Now())
+	_, err = stmt.Exec(accessToken, boskosId, prowId, status, zone, time.Now())
 	return err
 }
 
@@ -102,43 +130,33 @@ func (db *DB) ListClusters(window time.Duration) ([]Cluster, error) {
 }
 
 // DeleteCluster deletes a row from Cluster db
-func (db *DB) DeleteCluster(clusterId string) error {
+func (db *DB) DeleteCluster(accessToken string) error {
 	stmt, err := db.Prepare(`
 				DELETE FROM Cluster
 				WHERE ErrorPattern = ?`)
 	defer stmt.Close()
 
 	if err == nil {
-		err = execAffectingOneRow(stmt, clusterId)
+		err = execAffectingOneRow(stmt, accessToken)
 	}
 
 	return err
 }
 
-func (db *DB) generateUnique(idSize int, key string) string {
+func (db *DB) GenerateToken() string {
 	var randomid string
 	var count int
 	for {
 		randomid = string(uuid.NewUUID())
-		db.QueryRow("SELECT count(*) FROM Cluster Where $1 = $2", key, randomid).Scan(&count)
+		db.QueryRow("SELECT count(*) FROM Cluster Where AccessToken = ?", randomid).Scan(&count)
 		if count == 0 {
 			return randomid
 		}
 	}
 }
 
-func query() (bool, string, string) {
-	// check whether available cluster exists
-	return true, "", ""
-}
-
-func getWithToken(token string, status chan string) {
+func getCluster(token string) {
 	// check in with token
-
-}
-
-func updateCluster(zone, prowid, boskosid string) {
-	// assign cluster if available
 
 }
 
